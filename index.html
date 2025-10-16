@@ -1586,8 +1586,8 @@ ALTER PUBLICATION supabase_realtime ADD TABLE transactions;</code></pre>
 
     <script>
         // Supabase Configuration
-        const SUPABASE_URL = 'https://your-project-url.supabase.co';
-        const SUPABASE_ANON_KEY = 'your-anon-key-here';
+        const SUPABASE_URL = 'https://pdznydeaepxxmgfliejw.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBkem55ZGVhZXB4eG1nZmxpZWp3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1OTM2NDMsImV4cCI6MjA3NjE2OTY0M30.Qgbso5AksGiNUantohJwJ28Ul8PhzMu2fBWsBpQBL-w';
         
         // Initialize Supabase client
         let supabase;
@@ -1673,7 +1673,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE transactions;</code></pre>
         async function initializeSupabase() {
             try {
                 // Check if Supabase configuration is valid
-                if (SUPABASE_URL === 'https://your-project-url.supabase.co' || SUPABASE_ANON_KEY === 'your-anon-key-here') {
+                if (SUPABASE_URL === 'https://pdznydeaepxxmgfliejw.supabase.co' || SUPABASE_ANON_KEY === 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBkem55ZGVhZXB4eG1nZmxpZWp3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1OTM2NDMsImV4cCI6MjA3NjE2OTY0M30.Qgbso5AksGiNUantohJwJ28Ul8PhzMu2fBWsBpQBL-w') {
                     showSetupModal();
                     return;
                 }
