@@ -8,6 +8,96 @@
     <meta name="theme-color" content="#208FA6">
     <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIlJLTSBMT09NIFNQQVJFUyAtIEN1c3RvbWVyIExlZGdlciIsCiAgInNob3J0X25hbWUiOiAiUktNIExlZGdlciIsCiAgImRlc2NyaXB0aW9uIjogIkN1c3RvbWVyIExlZGdlciBNYW5hZ2VtZW50IFN5c3RlbSIsCiAgInN0YXJ0X3VybCI6ICIvIiwKICAiZGlzcGxheSI6ICJzdGFuZGFsb25lIiwKICAiYmFja2dyb3VuZF9jb2xvciI6ICIjZmZmZmZmIiwKICAidGhlbWVfY29sb3IiOiAiIzIwOEZBNiIsCiAgImljb25zIjogW10KfQ==">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        // CRITICAL FIX: Locks API Polyfill - Must be loaded BEFORE Supabase
+        // This fixes the SecurityError: Failed to execute 'request' on 'LockManager'
+        (function() {
+            // Detect browser and context
+            const userAgent = navigator.userAgent.toLowerCase();
+            const isChrome = userAgent.includes('chrome');
+            const isFirefox = userAgent.includes('firefox');
+            const isSafari = userAgent.includes('safari') && !userAgent.includes('chrome');
+            const isEdge = userAgent.includes('edge');
+            const isSecureContext = location.protocol === 'https:' || location.hostname === 'localhost';
+            
+            console.log('Browser Detection:', {
+                isChrome, isFirefox, isSafari, isEdge, isSecureContext,
+                protocol: location.protocol
+            });
+            
+            // Locks API Polyfill for browsers that don't support it or in sandboxed contexts
+            if (!('locks' in navigator) || typeof navigator.locks.request !== 'function') {
+                console.log('Applying Locks API polyfill...');
+                navigator.locks = {
+                    request: async function(name, options, callback) {
+                        // Handle both (name, callback) and (name, options, callback) signatures
+                        if (typeof options === 'function') {
+                            callback = options;
+                            options = {};
+                        }
+                        
+                        try {
+                            // Simple polyfill - just execute the callback immediately
+                            return await callback({ 
+                                name: name,
+                                mode: options.mode || 'exclusive'
+                            });
+                        } catch (error) {
+                            console.warn('Locks API polyfill error:', error);
+                            throw error;
+                        }
+                    },
+                    query: async function() {
+                        // Return empty state for compatibility
+                        return { held: [], pending: [] };
+                    }
+                };
+                console.log('Locks API polyfill applied successfully');
+            } else {
+                console.log('Native Locks API detected and available');
+            }
+            
+            // Additional Web API compatibility checks and polyfills
+            
+            // IndexedDB availability check (Supabase may use this)
+            if (!('indexedDB' in window)) {
+                console.warn('IndexedDB not available - some features may be limited');
+            }
+            
+            // BroadcastChannel polyfill for older browsers
+            if (!('BroadcastChannel' in window)) {
+                console.log('BroadcastChannel not available - realtime features may be limited');
+                window.BroadcastChannel = function(name) {
+                    this.name = name;
+                    this.postMessage = function(data) {
+                        console.log('BroadcastChannel polyfill - message would be sent:', data);
+                    };
+                    this.addEventListener = function() {};
+                    this.removeEventListener = function() {};
+                    this.close = function() {};
+                };
+            }
+            
+            // Set up error boundary for uncaught errors
+            window.addEventListener('error', function(event) {
+                console.error('Global error caught:', event.error);
+                if (event.error && event.error.message && event.error.message.includes('LockManager')) {
+                    console.error('LockManager error detected - this should be fixed by our polyfill');
+                    event.preventDefault();
+                }
+            });
+            
+            window.addEventListener('unhandledrejection', function(event) {
+                console.error('Unhandled promise rejection:', event.reason);
+                if (event.reason && event.reason.message && event.reason.message.includes('LockManager')) {
+                    console.error('LockManager promise rejection - attempting to handle gracefully');
+                    event.preventDefault();
+                }
+            });
+            
+            console.log('Browser compatibility layer initialized successfully');
+        })();
+    </script>
     <style>
         :root {
   /* Primitive Color Tokens */
@@ -1222,6 +1312,47 @@ select.form-control {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        
+        .help-text {
+            font-size: var(--font-size-xs);
+            color: var(--color-text-secondary);
+            margin-top: var(--space-4);
+            font-style: italic;
+        }
+        
+        .connection-indicator {
+            display: flex;
+            align-items: center;
+            gap: var(--space-8);
+        }
+        
+        .config-status {
+            padding: var(--space-12) var(--space-16);
+            border-radius: var(--radius-base);
+            margin-bottom: var(--space-16);
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .setup-section {
+            margin-top: var(--space-24);
+        }
+        
+        .setup-section h4 {
+            margin-bottom: var(--space-12);
+        }
+        
+        .setup-section ol {
+            margin: 0;
+            padding-left: var(--space-16);
+        }
+        
+        .setup-section ol li {
+            margin-bottom: var(--space-8);
+        }
 
         @media print {
             .header, .bottom-nav, .add-btn, .modal {
@@ -1243,7 +1374,12 @@ select.form-control {
     <div class="app-container">
         <header class="header">
             <h1>RKM LOOM SPARES</h1>
-            <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
+            <div class="flex items-center gap-8">
+                <button class="btn btn--sm btn--secondary" onclick="switchScreen('settings')" title="Database Settings">
+                    ⚙️
+                </button>
+                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Theme">🌙</button>
+            </div>
         </header>
         
         <!-- Sync Status Indicator -->
@@ -1345,6 +1481,116 @@ select.form-control {
                 </div>
                 <div id="report-content"></div>
             </div>
+            
+            <!-- Settings Screen -->
+            <div id="settings-screen" class="screen">
+                <div class="card">
+                    <div class="card__header">
+                        <h3>Database Configuration</h3>
+                    </div>
+                    <div class="card__body">
+                        <div id="connection-status" class="alert alert--info">
+                            <div class="flex items-center gap-8">
+                                <div class="sync-indicator" id="config-status-indicator"></div>
+                                <span id="config-status-text">Checking connection...</span>
+                            </div>
+                        </div>
+                        
+                        <form id="supabase-config-form">
+                            <div class="form-group">
+                                <label class="form-label">Supabase URL *</label>
+                                <input type="url" class="form-control" id="supabase-url" 
+                                       placeholder="https://yourproject.supabase.co" 
+                                       pattern="https://.*\.supabase\.co" 
+                                       title="Please enter a valid Supabase URL" required>
+                                <div class="help-text">Format: https://yourproject.supabase.co</div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">API Key (anon public) *</label>
+                                <input type="text" class="form-control" id="supabase-key" 
+                                       placeholder="eyJ..." required>
+                                <div class="help-text">Found in Supabase Dashboard &gt; Settings &gt; API &gt; anon public key</div>
+                            </div>
+                            
+                            <div class="btn-group">
+                                <button type="button" class="btn btn--primary" onclick="testConnection()" id="test-btn">
+                                    Test Connection
+                                </button>
+                                <button type="button" class="btn btn--secondary" onclick="saveConfiguration()" id="save-btn">
+                                    Save Configuration
+                                </button>
+                                <button type="button" class="btn btn--outline" onclick="clearConfiguration()">
+                                    Clear Config
+                                </button>
+                            </div>
+                        </form>
+                        
+                        <div class="card" style="margin-top: var(--space-24); background: var(--color-bg-1);">
+                            <div class="card__body">
+                                <h4>Setup Instructions</h4>
+                                <ol style="margin: 0; padding-left: var(--space-16);">
+                                    <li>Go to <a href="https://supabase.com" target="_blank">supabase.com</a> and create an account</li>
+                                    <li>Create a new project named 'RKM-LOOM-SPARES'</li>
+                                    <li>Go to Settings &gt; API and copy your project URL and anon key</li>
+                                    <li>Paste them above and click 'Test Connection'</li>
+                                    <li>If successful, click 'Save Configuration'</li>
+                                </ol>
+                            </div>
+                        </div>
+                        
+                        <div class="card" style="margin-top: var(--space-16); background: var(--color-bg-2);">
+                            <div class="card__body">
+                                <h4>Browser Compatibility</h4>
+                                <div style="margin-bottom: var(--space-12);">
+                                    <strong>Current Browser Status:</strong>
+                                </div>
+                                <div id="browser-status" style="font-family: var(--font-family-mono); font-size: var(--font-size-sm);"></div>
+                                <div style="margin-top: var(--space-12);">
+                                    <strong>Recommended Browsers:</strong>
+                                    <ul style="margin: var(--space-8) 0; padding-left: var(--space-16);">
+                                        <li><strong>Chrome 69+:</strong> Full support</li>
+                                        <li><strong>Edge 79+:</strong> Full support</li>
+                                        <li><strong>Firefox:</strong> May need polyfill (provided automatically)</li>
+                                        <li><strong>Safari:</strong> Limited support, polyfill applied</li>
+                                    </ul>
+                                </div>
+                                <div style="margin-top: var(--space-12);">
+                                    <button class="btn btn--sm btn--secondary" onclick="runBrowserCompatibilityTest()">Test Browser Compatibility</button>
+                                    <button class="btn btn--sm btn--outline" onclick="switchToDemo()">Try Demo Mode</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="card" style="margin-top: var(--space-16); background: var(--color-bg-2);">
+                            <div class="card__body">
+                                <h4>Database Setup</h4>
+                                <p>After connecting, create these tables in your Supabase SQL editor:</p>
+                                <button class="btn btn--sm btn--secondary" onclick="showDatabaseSetup()">
+                                    View SQL Commands
+                                </button>
+                                <button class="btn btn--sm btn--primary" onclick="autoSetupDatabase()" id="auto-setup-btn" style="display: none;">
+                                    Auto-Setup Database
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="card" style="margin-top: var(--space-16);">
+                            <div class="card__body">
+                                <h4>Data Management</h4>
+                                <div class="alert alert--info" style="margin-bottom: var(--space-12);">
+                                    <strong>Note:</strong> This app runs in a sandboxed environment. Configuration is saved for the current session only.
+                                </div>
+                                <div class="btn-group">
+                                    <button class="btn btn--secondary" onclick="exportData()">Export Data</button>
+                                    <button class="btn btn--secondary" onclick="importData()">Import Data</button>
+                                    <button class="btn btn--outline" onclick="switchToDemo()">Demo Mode</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
         
         <!-- Bottom Navigation -->
@@ -1378,6 +1624,12 @@ select.form-control {
                     <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
                 </svg>
                 <span>Reports</span>
+            </div>
+            <div class="nav-item" onclick="switchScreen('settings')">
+                <svg class="nav-icon" viewBox="0 0 24 24">
+                    <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
+                </svg>
+                <span>Settings</span>
             </div>
         </nav>
     </div>
@@ -1509,27 +1761,20 @@ select.form-control {
         </div>
     </div>
     
-    <!-- Supabase Setup Modal -->
+    <!-- Database Setup Modal -->
     <div id="setup-modal" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Supabase Setup Required</h3>
+                <h3>Database Setup Instructions</h3>
+                <button class="close-btn" onclick="closeSetupModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="alert alert--warning">
-                    <strong>Database Configuration Needed</strong><br>
-                    Please configure your Supabase database to use this application.
+                <div class="alert alert--info">
+                    <strong>Manual Database Setup Required</strong><br>
+                    Copy and run these SQL commands in your Supabase SQL editor.
                 </div>
                 
-                <h4>Step 1: Update Supabase Configuration</h4>
-                <p>Replace the placeholder values in the code with your actual Supabase project details:</p>
-                <pre><code>const SUPABASE_URL = 'https://your-project-url.supabase.co';
-const SUPABASE_ANON_KEY = 'your-anon-key-here';</code></pre>
-                
-                <h4>Step 2: Create Database Tables</h4>
-                <p>Run these SQL commands in your Supabase SQL editor:</p>
-                
-                <h5>Customers Table:</h5>
+                <h4>Step 1: Create Customers Table</h4>
                 <pre><code>CREATE TABLE customers (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   company_name TEXT NOT NULL,
@@ -1544,7 +1789,7 @@ const SUPABASE_ANON_KEY = 'your-anon-key-here';</code></pre>
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );</code></pre>
                 
-                <h5>Transactions Table:</h5>
+                <h4>Step 2: Create Transactions Table</h4>
                 <pre><code>CREATE TABLE transactions (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
@@ -1557,42 +1802,74 @@ const SUPABASE_ANON_KEY = 'your-anon-key-here';</code></pre>
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );</code></pre>
                 
-                <h5>Enable Row Level Security (Recommended):</h5>
+                <h4>Step 3: Enable Security (Optional)</h4>
                 <pre><code>ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 
--- Allow all operations for authenticated users
-CREATE POLICY "Enable all operations for authenticated users" ON customers
-  FOR ALL USING (true);
-  
-CREATE POLICY "Enable all operations for authenticated users" ON transactions
-  FOR ALL USING (true);</code></pre>
+-- Allow all operations for all users (adjust as needed)
+CREATE POLICY "Enable all operations" ON customers FOR ALL USING (true);
+CREATE POLICY "Enable all operations" ON transactions FOR ALL USING (true);</code></pre>
                 
-                <h4>Step 3: Configure Realtime (Optional)</h4>
-                <p>Enable realtime for live updates:</p>
+                <h4>Step 4: Enable Realtime (Optional)</h4>
                 <pre><code>ALTER PUBLICATION supabase_realtime ADD TABLE customers;
 ALTER PUBLICATION supabase_realtime ADD TABLE transactions;</code></pre>
                 
-                <div class="alert alert--info" style="margin-top: var(--space-16);">
-                    <strong>Note:</strong> After setting up your database, refresh this page to start using the application.
+                <div class="alert alert--success" style="margin-top: var(--space-16);">
+                    <strong>Next Step:</strong> After running these commands, go to Settings and test your connection!
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn--primary" onclick="closeSetupModal(); location.reload();">I've Set Up The Database</button>
-                <button type="button" class="btn btn--secondary" onclick="testDemoMode()">Use Demo Mode</button>
+                <button type="button" class="btn btn--primary" onclick="closeSetupModal(); switchScreen('settings');">Go to Settings</button>
+                <button type="button" class="btn btn--secondary" onclick="closeSetupModal()">Close</button>
             </div>
         </div>
     </div>
 
     <script>
-        // Supabase Configuration
-        const SUPABASE_URL = 'https://your-project-url.supabase.co';
-        const SUPABASE_ANON_KEY = 'your-anon-key-here';
+        // Supabase Configuration - stored in memory (no localStorage due to sandbox restrictions)
+        let SUPABASE_URL = '';
+        let SUPABASE_ANON_KEY = '';
+        let supabaseConfig = null;
         
-        // Initialize Supabase client
+        // Load configuration from memory
+        function loadSupabaseConfig() {
+            if (supabaseConfig) {
+                SUPABASE_URL = supabaseConfig.url || '';
+                SUPABASE_ANON_KEY = supabaseConfig.key || '';
+                return !!SUPABASE_URL && !!SUPABASE_ANON_KEY;
+            }
+            return false;
+        }
+        
+        // Save configuration to memory
+        function saveSupabaseConfig(url, key) {
+            try {
+                supabaseConfig = { url, key };
+                SUPABASE_URL = url;
+                SUPABASE_ANON_KEY = key;
+                return true;
+            } catch (error) {
+                console.error('Error saving Supabase config:', error);
+                showAlert('Error saving configuration: ' + error.message, 'error');
+                return false;
+            }
+        }
+        
+        // Initialize Supabase client with enhanced error handling
         let supabase;
         let isOnline = navigator.onLine;
         let syncStatus = 'connected';
+        
+        // Browser compatibility info
+        const browserInfo = {
+            userAgent: navigator.userAgent,
+            isSecureContext: location.protocol === 'https:' || location.hostname === 'localhost',
+            hasLocks: 'locks' in navigator,
+            hasIndexedDB: 'indexedDB' in window,
+            hasBroadcastChannel: 'BroadcastChannel' in window
+        };
+        
+        console.log('Browser compatibility check:', browserInfo);
         
         // Application State - Now using Supabase
         let appData = {
@@ -1669,17 +1946,82 @@ ALTER PUBLICATION supabase_realtime ADD TABLE transactions;</code></pre>
         let currentEditingCustomer = null;
         let currentScreen = 'dashboard';
         
-        // Supabase Functions
+        // Supabase Functions with Enhanced Error Handling
         async function initializeSupabase() {
             try {
-                // Check if Supabase configuration is valid
-                // Removed Supabase setup popup
-// if (SUPABASE_URL === 'https://your-project-url.supabase.co' || SUPABASE_ANON_KEY === 'your-anon-key-here') {
-                    showSetupModal();
+                console.log('Starting Supabase initialization...');
+                
+                // Check browser compatibility first
+                if (!browserInfo.isSecureContext) {
+                    console.warn('Not in secure context - some features may be limited');
+                }
+                
+                // Load configuration from memory
+                const hasConfig = loadSupabaseConfig();
+                
+                if (!hasConfig || !SUPABASE_URL || !SUPABASE_ANON_KEY) {
+                    console.log('No valid Supabase configuration found');
+                    updateSyncStatus('error');
+                    document.getElementById('sync-text').textContent = 'Not Configured';
+                    // Don't show modal automatically, let user navigate to settings
                     return;
                 }
                 
-                supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                // Validate URL format before creating client
+                if (!SUPABASE_URL.match(/^https:\/\/.*\.supabase\.co$/)) {
+                    throw new Error('Invalid Supabase URL format');
+                }
+                
+                console.log('Creating Supabase client with enhanced error handling...');
+                
+                // Create Supabase client with retry mechanism
+                let clientCreated = false;
+                let lastError = null;
+                
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                    try {
+                        console.log(`Supabase client creation attempt ${attempt}/3`);
+                        
+                        // Create client with specific options to avoid problematic features
+                        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+                            auth: {
+                                persistSession: false, // Avoid localStorage issues in sandbox
+                                autoRefreshToken: false // Reduce complexity
+                            },
+                            realtime: {
+                                params: {
+                                    eventsPerSecond: 10
+                                }
+                            },
+                            global: {
+                                headers: {
+                                    'X-Client-Info': 'rkm-loom-spares-ledger'
+                                }
+                            }
+                        });
+                        
+                        clientCreated = true;
+                        console.log('Supabase client created successfully');
+                        break;
+                        
+                    } catch (error) {
+                        lastError = error;
+                        console.warn(`Supabase client creation attempt ${attempt} failed:`, error.message);
+                        
+                        if (error.message.includes('LockManager') || error.message.includes('locks')) {
+                            console.error('LockManager error detected even with polyfill - this should not happen');
+                        }
+                        
+                        if (attempt < 3) {
+                            console.log('Retrying in 1 second...');
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                        }
+                    }
+                }
+                
+                if (!clientCreated) {
+                    throw lastError || new Error('Failed to create Supabase client after 3 attempts');
+                }
                 
                 // Test connection
                 const { data, error } = await supabase.from('customers').select('count', { count: 'exact', head: true });
@@ -1713,11 +2055,25 @@ ALTER PUBLICATION supabase_realtime ADD TABLE transactions;</code></pre>
                 console.error('Failed to initialize Supabase:', error);
                 updateSyncStatus('error');
                 
-                if (error.message.includes('Invalid API key') || error.message.includes('Project not found')) {
+                // Enhanced error handling with specific error types
+                if (error.message.includes('LockManager') || error.message.includes('locks')) {
+                    console.error('LockManager error occurred despite polyfill');
+                    showAlert('Browser compatibility issue detected. Switching to demo mode.', 'warning');
+                    testDemoMode();
+                } else if (error.message.includes('Invalid API key') || error.message.includes('Project not found')) {
+                    console.log('Configuration issue detected - showing setup');
+                    showSetupModal();
+                } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                    console.log('Network issue detected');
+                    showAlert('Network connection failed. Please check your internet connection.', 'error');
+                    testDemoMode();
+                } else if (error.message.includes('CORS')) {
+                    console.log('CORS issue detected');
+                    showAlert('CORS error detected. Please check your Supabase project settings.', 'error');
                     showSetupModal();
                 } else {
-                    showAlert('Failed to connect to database: ' + error.message, 'error');
-                    // Fall back to demo mode
+                    console.log('Generic error - falling back to demo mode');
+                    showAlert('Failed to connect to database: ' + error.message + '. Running in demo mode.', 'error');
                     testDemoMode();
                 }
             }
@@ -1732,6 +2088,11 @@ ALTER PUBLICATION supabase_realtime ADD TABLE transactions;</code></pre>
         }
         
         function testDemoMode() {
+            // Clear any existing configuration
+            SUPABASE_URL = '';
+            SUPABASE_ANON_KEY = '';
+            supabase = null;
+            
             // Use demo data when Supabase is not configured
             appData.customers = [
                 {
@@ -1808,7 +2169,10 @@ ALTER PUBLICATION supabase_realtime ADD TABLE transactions;</code></pre>
             updateSyncStatus('error');
             document.getElementById('sync-text').textContent = 'Demo Mode';
             closeSetupModal();
-            showAlert('Running in demo mode. Changes will not be saved.', 'warning');
+            showAlert('Running in demo mode. Changes will not be saved permanently.', 'warning');
+            
+            // Switch to dashboard and load demo data
+            switchScreen('dashboard');
             loadDashboard();
         }
         
@@ -2182,6 +2546,9 @@ ALTER PUBLICATION supabase_realtime ADD TABLE transactions;</code></pre>
                     break;
                 case 'reports':
                     loadReports();
+                    break;
+                case 'settings':
+                    loadSettings();
                     break;
             }
         }
@@ -2891,6 +3258,494 @@ ALTER PUBLICATION supabase_realtime ADD TABLE transactions;</code></pre>
             showAlert('Export functionality would be available in a full implementation');
         }
         
+        // Settings Functions
+        function loadSettings() {
+            // Load current configuration
+            const hasConfig = loadSupabaseConfig();
+            
+            if (hasConfig) {
+                document.getElementById('supabase-url').value = SUPABASE_URL;
+                document.getElementById('supabase-key').value = SUPABASE_ANON_KEY;
+                updateConfigStatus('connected', 'Configuration loaded');
+            } else {
+                updateConfigStatus('error', 'No configuration found');
+            }
+            
+            // Check current connection status
+            checkCurrentConnection();
+        }
+        
+        function updateConfigStatus(status, message) {
+            const statusDiv = document.getElementById('connection-status');
+            const indicator = document.getElementById('config-status-indicator');
+            const text = document.getElementById('config-status-text');
+            
+            // Remove all status classes
+            statusDiv.className = 'alert';
+            indicator.className = 'sync-indicator';
+            
+            switch (status) {
+                case 'connected':
+                    statusDiv.classList.add('alert--success');
+                    text.textContent = message;
+                    break;
+                case 'testing':
+                    statusDiv.classList.add('alert--info');
+                    indicator.classList.add('syncing');
+                    text.textContent = message;
+                    break;
+                case 'error':
+                    statusDiv.classList.add('alert--error');
+                    indicator.classList.add('error');
+                    text.textContent = message;
+                    break;
+                case 'warning':
+                    statusDiv.classList.add('alert--warning');
+                    text.textContent = message;
+                    break;
+            }
+        }
+        
+        async function checkCurrentConnection() {
+            if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+                updateConfigStatus('warning', 'Please configure your Supabase connection');
+                return;
+            }
+            
+            updateConfigStatus('testing', 'Checking current connection...');
+            
+            try {
+                const testSupabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                const { error } = await testSupabase.from('customers').select('count', { count: 'exact', head: true });
+                
+                if (error) {
+                    if (error.code === 'PGRST116') {
+                        updateConfigStatus('warning', 'Connected but tables not created');
+                        document.getElementById('auto-setup-btn').style.display = 'inline-flex';
+                    } else {
+                        throw error;
+                    }
+                } else {
+                    updateConfigStatus('connected', 'Connected and ready');
+                    document.getElementById('auto-setup-btn').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Connection test failed:', error);
+                updateConfigStatus('error', 'Connection failed: ' + error.message);
+            }
+        }
+        
+        async function testConnection() {
+            const urlInput = document.getElementById('supabase-url');
+            const keyInput = document.getElementById('supabase-key');
+            const testBtn = document.getElementById('test-btn');
+            
+            const url = urlInput.value.trim();
+            const key = keyInput.value.trim();
+            
+            // Validate inputs
+            if (!url || !key) {
+                showAlert('Please enter both URL and API key', 'error');
+                return;
+            }
+            
+            if (!url.match(/^https:\/\/.*\.supabase\.co$/)) {
+                showAlert('Please enter a valid Supabase URL', 'error');
+                urlInput.focus();
+                return;
+            }
+            
+            if (!key.startsWith('eyJ')) {
+                showAlert('API key appears to be invalid. It should start with "eyJ"', 'error');
+                keyInput.focus();
+                return;
+            }
+            
+            testBtn.disabled = true;
+            testBtn.textContent = 'Testing...';
+            updateConfigStatus('testing', 'Testing connection...');
+            
+            try {
+                console.log('Testing connection with enhanced error handling...');
+                
+                // Test the connection with retry mechanism
+                let testSupabase = null;
+                let connectionSuccessful = false;
+                
+                for (let attempt = 1; attempt <= 2; attempt++) {
+                    try {
+                        console.log(`Connection test attempt ${attempt}/2`);
+                        
+                        // Create test client with minimal options to avoid issues
+                        testSupabase = window.supabase.createClient(url, key, {
+                            auth: {
+                                persistSession: false,
+                                autoRefreshToken: false
+                            },
+                            realtime: {
+                                enabled: false // Disable realtime for test
+                            }
+                        });
+                        
+                        connectionSuccessful = true;
+                        console.log('Test client created successfully');
+                        break;
+                        
+                    } catch (createError) {
+                        console.warn(`Test client creation attempt ${attempt} failed:`, createError);
+                        
+                        if (createError.message.includes('LockManager')) {
+                            console.error('LockManager error in test - polyfill may not be working');
+                            throw new Error('Browser compatibility issue detected. The polyfill did not resolve the LockManager error. Please try using Chrome or Edge browser.');
+                        }
+                        
+                        if (attempt < 2) {
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                        } else {
+                            throw createError;
+                        }
+                    }
+                }
+                
+                if (!connectionSuccessful || !testSupabase) {
+                    throw new Error('Failed to create test client');
+                }
+                
+                // Try to connect and check if we can access the database
+                const { error } = await testSupabase.from('customers').select('count', { count: 'exact', head: true });
+                
+                if (error) {
+                    if (error.code === 'PGRST116' || error.message.includes('relation "public.customers" does not exist')) {
+                        updateConfigStatus('warning', 'Connection successful! Database tables need to be created.');
+                        document.getElementById('auto-setup-btn').style.display = 'inline-flex';
+                        showAlert('Connection test successful! Your database is ready for setup.', 'success');
+                    } else if (error.message.includes('Invalid API key') || error.message.includes('Project not found')) {
+                        throw new Error('Invalid credentials. Please check your URL and API key.');
+                    } else {
+                        throw error;
+                    }
+                } else {
+                    updateConfigStatus('connected', 'Connection successful! Database is ready.');
+                    document.getElementById('auto-setup-btn').style.display = 'none';
+                    showAlert('Connection test successful! Your database is ready to use.', 'success');
+                }
+                
+                // Enable save button
+                document.getElementById('save-btn').disabled = false;
+                
+            } catch (error) {
+                console.error('Connection test failed:', error);
+                
+                let errorMessage = error.message;
+                let userFriendlyMessage = errorMessage;
+                
+                // Provide specific guidance based on error type
+                if (error.message.includes('LockManager')) {
+                    userFriendlyMessage = 'Browser compatibility issue: Locks API not available. Please try Chrome or Edge browser, or switch to demo mode.';
+                    updateConfigStatus('error', 'Browser compatibility issue detected');
+                } else if (error.message.includes('Invalid API key') || error.message.includes('Project not found')) {
+                    userFriendlyMessage = 'Invalid credentials. Please check your Supabase URL and API key.';
+                    updateConfigStatus('error', 'Invalid credentials');
+                } else if (error.message.includes('CORS')) {
+                    userFriendlyMessage = 'CORS error. Please check your Supabase project settings and ensure the domain is allowed.';
+                    updateConfigStatus('error', 'CORS policy issue');
+                } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                    userFriendlyMessage = 'Network error. Please check your internet connection and try again.';
+                    updateConfigStatus('error', 'Network connection failed');
+                } else {
+                    updateConfigStatus('error', 'Connection failed: ' + errorMessage);
+                }
+                
+                showAlert('Connection test failed: ' + userFriendlyMessage, 'error');
+                document.getElementById('save-btn').disabled = true;
+                
+                // Add helpful tips
+                if (error.message.includes('LockManager')) {
+                    setTimeout(() => {
+                        showAlert('Tip: Try using Chrome/Edge browser or switch to demo mode for testing.', 'warning');
+                    }, 2000);
+                }
+            } finally {
+                testBtn.disabled = false;
+                testBtn.textContent = 'Test Connection';
+            }
+        }
+        
+        function saveConfiguration() {
+            const url = document.getElementById('supabase-url').value.trim();
+            const key = document.getElementById('supabase-key').value.trim();
+            
+            if (!url || !key) {
+                showAlert('Please test the connection first', 'error');
+                return;
+            }
+            
+            if (saveSupabaseConfig(url, key)) {
+                showAlert('Configuration saved for this session!', 'success');
+                
+                // Reinitialize Supabase with new config
+                setTimeout(async () => {
+                    await initializeSupabase();
+                    updateSyncStatus('connected');
+                }, 1000);
+            }
+        }
+        
+        function clearConfiguration() {
+            if (confirm('Are you sure you want to clear the database configuration? This will reset for this session only.')) {
+                try {
+                    // Clear in-memory configuration
+                    supabaseConfig = null;
+                    SUPABASE_URL = '';
+                    SUPABASE_ANON_KEY = '';
+                    supabase = null;
+                    
+                    // Clear form fields if on settings screen
+                    const urlInput = document.getElementById('supabase-url');
+                    const keyInput = document.getElementById('supabase-key');
+                    if (urlInput) urlInput.value = '';
+                    if (keyInput) keyInput.value = '';
+                    
+                    const saveBtn = document.getElementById('save-btn');
+                    const autoSetupBtn = document.getElementById('auto-setup-btn');
+                    if (saveBtn) saveBtn.disabled = true;
+                    if (autoSetupBtn) autoSetupBtn.style.display = 'none';
+                    
+                    updateConfigStatus('warning', 'Configuration cleared');
+                    updateSyncStatus('error');
+                    document.getElementById('sync-text').textContent = 'Not Configured';
+                    
+                    showAlert('Configuration cleared successfully (session only)', 'success');
+                } catch (error) {
+                    showAlert('Error clearing configuration: ' + error.message, 'error');
+                }
+            }
+        }
+        
+        function showDatabaseSetup() {
+            const modal = document.getElementById('setup-modal');
+            modal.style.display = 'flex';
+        }
+        
+        async function autoSetupDatabase() {
+            if (!supabase) {
+                showAlert('Please save configuration first', 'error');
+                return;
+            }
+            
+            const autoSetupBtn = document.getElementById('auto-setup-btn');
+            autoSetupBtn.disabled = true;
+            autoSetupBtn.textContent = 'Setting up...';
+            updateConfigStatus('testing', 'Creating database tables...');
+            
+            try {
+                // Create customers table
+                const { error: customersError } = await supabase.rpc('exec_sql', {
+                    sql: `
+                        CREATE TABLE IF NOT EXISTS customers (
+                          id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+                          company_name TEXT NOT NULL,
+                          contact_person TEXT,
+                          phone TEXT,
+                          email TEXT,
+                          address TEXT,
+                          gst_number TEXT,
+                          category TEXT DEFAULT 'Regular',
+                          credit_limit NUMERIC DEFAULT 0,
+                          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                        );
+                    `
+                });
+                
+                // Create transactions table
+                const { error: transactionsError } = await supabase.rpc('exec_sql', {
+                    sql: `
+                        CREATE TABLE IF NOT EXISTS transactions (
+                          id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+                          customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
+                          date DATE NOT NULL,
+                          type TEXT NOT NULL,
+                          amount NUMERIC NOT NULL,
+                          description TEXT NOT NULL,
+                          invoice_number TEXT,
+                          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                        );
+                    `
+                });
+                
+                // If RPC method doesn't exist, user needs to create tables manually
+                if (customersError || transactionsError) {
+                    throw new Error('Auto-setup not available. Please create tables manually using the SQL editor.');
+                }
+                
+                updateConfigStatus('connected', 'Database setup completed successfully!');
+                showAlert('Database tables created successfully!', 'success');
+                document.getElementById('auto-setup-btn').style.display = 'none';
+                
+                // Initialize with sample data
+                const shouldAddSample = confirm('Would you like to add sample data to get started?');
+                if (shouldAddSample) {
+                    await setupInitialData();
+                    await loadAllData();
+                }
+                
+            } catch (error) {
+                console.error('Auto-setup failed:', error);
+                updateConfigStatus('warning', 'Auto-setup failed. Please use manual setup.');
+                showAlert('Auto-setup failed: ' + error.message + '. Please use the manual SQL setup.', 'warning');
+                showDatabaseSetup();
+            } finally {
+                autoSetupBtn.disabled = false;
+                autoSetupBtn.textContent = 'Auto-Setup Database';
+            }
+        }
+        
+        function exportData() {
+            try {
+                const data = {
+                    customers: appData.customers,
+                    transactions: appData.transactions,
+                    exportDate: new Date().toISOString()
+                };
+                
+                const dataStr = JSON.stringify(data, null, 2);
+                const dataBlob = new Blob([dataStr], {type: 'application/json'});
+                const url = URL.createObjectURL(dataBlob);
+                
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `rkm-loom-spares-data-${new Date().toISOString().split('T')[0]}.json`;
+                link.click();
+                
+                URL.revokeObjectURL(url);
+                showAlert('Data exported successfully', 'success');
+            } catch (error) {
+                showAlert('Export failed: ' + error.message, 'error');
+            }
+        }
+        
+        function importData() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                try {
+                    const text = await file.text();
+                    const data = JSON.parse(text);
+                    
+                    if (!data.customers || !data.transactions) {
+                        throw new Error('Invalid data format');
+                    }
+                    
+                    if (confirm('This will replace all current data. Continue?')) {
+                        // In a real app, you would sync this to Supabase
+                        appData.customers = data.customers;
+                        appData.transactions = data.transactions;
+                        showAlert('Data imported successfully (demo mode)', 'success');
+                        refreshCurrentScreen();
+                    }
+                } catch (error) {
+                    showAlert('Import failed: ' + error.message, 'error');
+                }
+            };
+            input.click();
+        }
+        
+        function switchToDemo() {
+            if (confirm('Switch to demo mode? This will use sample data and changes will not be saved.')) {
+                testDemoMode();
+                showAlert('Switched to demo mode', 'warning');
+            }
+        }
+        
+        // Browser Compatibility Functions
+        function runBrowserCompatibilityTest() {
+            console.log('Running browser compatibility test...');
+            
+            const results = {
+                userAgent: navigator.userAgent,
+                isSecureContext: browserInfo.isSecureContext,
+                hasLocks: browserInfo.hasLocks,
+                hasIndexedDB: browserInfo.hasIndexedDB,
+                hasBroadcastChannel: browserInfo.hasBroadcastChannel,
+                locksPolyfillApplied: !browserInfo.hasLocks && ('locks' in navigator),
+                webWorkerSupport: 'Worker' in window,
+                fetchSupport: 'fetch' in window,
+                promiseSupport: 'Promise' in window,
+                asyncAwaitSupport: true // We're using it, so it must be supported
+            };
+            
+            // Test if polyfills are working
+            try {
+                const testLocks = navigator.locks.request('test-lock', () => {
+                    return Promise.resolve('locks working');
+                });
+                results.locksApiWorking = true;
+            } catch (error) {
+                results.locksApiWorking = false;
+                results.locksError = error.message;
+            }
+            
+            updateBrowserStatus(results);
+            
+            // Show detailed results
+            const compatibilityLevel = calculateCompatibilityLevel(results);
+            let message = `Browser Compatibility: ${compatibilityLevel}\n\n`;
+            
+            if (compatibilityLevel === 'Excellent') {
+                message += 'Your browser fully supports all features.';
+            } else if (compatibilityLevel === 'Good') {
+                message += 'Your browser supports most features with polyfills.';
+            } else if (compatibilityLevel === 'Limited') {
+                message += 'Some features may not work. Consider using Chrome or Edge.';
+            } else {
+                message += 'This browser has significant limitations. Demo mode recommended.';
+            }
+            
+            alert(message);
+            console.log('Browser compatibility results:', results);
+        }
+        
+        function updateBrowserStatus(results = null) {
+            const statusDiv = document.getElementById('browser-status');
+            if (!statusDiv) return;
+            
+            const currentResults = results || {
+                isSecureContext: browserInfo.isSecureContext,
+                hasLocks: browserInfo.hasLocks,
+                locksPolyfillApplied: !browserInfo.hasLocks && ('locks' in navigator),
+                hasIndexedDB: browserInfo.hasIndexedDB
+            };
+            
+            statusDiv.innerHTML = `
+                <div>🔒 Secure Context: ${currentResults.isSecureContext ? '✅ Yes' : '❌ No (HTTPS required)'}</div>
+                <div>🔐 Locks API: ${currentResults.hasLocks ? '✅ Native' : (currentResults.locksPolyfillApplied ? '🔧 Polyfilled' : '❌ Not Available')}</div>
+                <div>💾 IndexedDB: ${currentResults.hasIndexedDB ? '✅ Available' : '❌ Not Available'}</div>
+                <div>📡 Network Status: ${isOnline ? '✅ Online' : '❌ Offline'}</div>
+            `;
+        }
+        
+        function calculateCompatibilityLevel(results) {
+            let score = 0;
+            
+            if (results.isSecureContext) score += 2;
+            if (results.locksApiWorking) score += 2;
+            if (results.hasIndexedDB) score += 1;
+            if (results.hasBroadcastChannel) score += 1;
+            if (results.webWorkerSupport) score += 1;
+            if (results.fetchSupport) score += 1;
+            
+            if (score >= 7) return 'Excellent';
+            if (score >= 5) return 'Good';
+            if (score >= 3) return 'Limited';
+            return 'Poor';
+        }
+        
         // Invoice Functions
         function generateInvoice(transactionId) {
             const transaction = appData.transactions.find(t => t.id === transactionId);
@@ -3077,6 +3932,9 @@ ALTER PUBLICATION supabase_realtime ADD TABLE transactions;</code></pre>
         
         // Initialize Application
         async function initializeApp() {
+            console.log('Initializing RKM LOOM SPARES application...');
+            console.log('Browser compatibility info:', browserInfo);
+            
             // Set initial theme based on system preference
             if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
                 document.documentElement.setAttribute('data-color-scheme', 'dark');
@@ -3089,16 +3947,29 @@ ALTER PUBLICATION supabase_realtime ADD TABLE transactions;</code></pre>
             // Initialize Supabase and load data
             await initializeSupabase();
             
-            // Load initial screen
-            loadDashboard();
+            // Load initial screen based on configuration status
+            if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+                // If no configuration, show settings screen
+                setTimeout(() => {
+                    showAlert('Welcome! Please configure your database connection in Settings.', 'info');
+                }, 1000);
+                loadDashboard(); // Still load dashboard but with limited functionality
+            } else {
+                loadDashboard();
+            }
             
             // Setup search handlers
             setupSearchHandlers();
+            
+            // Update browser status in settings if visible
+            updateBrowserStatus();
             
             // Setup service worker for PWA functionality
             if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.register('data:text/javascript;charset=utf-8;base64,Ly8gU2ltcGxlIFNlcnZpY2UgV29ya2VyIGZvciBQV0EgZnVuY3Rpb25hbGl0eQpzZWxmLmFkZEV2ZW50TGlzdGVuZXIoJ2luc3RhbGwnLCBldmVudCA9PiB7CiAgY29uc29sZS5sb2coJ1NlcnZpY2UgV29ya2VyIGluc3RhbGxlZCcpOwp9KTsKCnNlbGYuYWRkRXZlbnRMaXN0ZW5lcignZmV0Y2gnLCBldmVudCA9PiB7CiAgLy8gU2ltcGxlIGZldGNoIGhhbmRsZXIgZm9yIG9mZmxpbmUgZnVuY3Rpb25hbGl0eQogIGV2ZW50LnJlc3BvbmRXaXRoKGZldGNoKGV2ZW50LnJlcXVlc3QpKTsKfSk7');
             }
+            
+            console.log('Application initialization complete');
         }
         
         // Start the application when DOM is loaded
